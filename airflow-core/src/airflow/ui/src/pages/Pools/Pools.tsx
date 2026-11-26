@@ -37,7 +37,7 @@ import { SearchBar } from "src/components/SearchBar";
 import type { SearchParamsKeysType } from "src/constants/searchParams";
 import { SearchParamsKeys } from "src/constants/searchParams";
 import { useAdvancedSearch } from "src/hooks/useAdvancedSearch";
-import { useDocumentTitle } from "src/utils";
+import { useAutoRefresh, useDocumentTitle } from "src/utils";
 
 import AddPoolButton from "./AddPoolButton";
 import PoolBarCard from "./PoolBarCard";
@@ -48,6 +48,20 @@ const cardDef = (): CardDef<PoolResponse> => ({
     customSkeleton: <Skeleton height="100px" width="100%" />,
   },
 });
+
+// Slot counts only move while tasks use the pools, so poll an idle list 10x less often.
+export const getPoolsRefetchInterval = (
+  pools: Array<PoolResponse> | undefined,
+  interval: number | false,
+): number | false => {
+  if (interval === false) {
+    return false;
+  }
+
+  return pools?.some((pool) => pool.occupied_slots > 0 || pool.scheduled_slots > 0)
+    ? interval
+    : interval * 10;
+};
 
 export const Pools = () => {
   const { t: translate } = useTranslation(["admin", "common"]);
@@ -70,14 +84,20 @@ export const Pools = () => {
   const [sort] = sorting;
   const orderBy = sort ? [`${sort.desc ? "-" : ""}${sort.id}`] : ["name"];
 
-  const { data, error, isLoading } = usePoolServiceGetPools({
-    limit: pagination.pageSize,
-    offset: pagination.pageIndex * pagination.pageSize,
-    orderBy,
-    ...(advancedSearch.enabled
-      ? { poolNamePattern: poolNamePattern ?? undefined }
-      : { poolNamePrefixPattern: poolNamePattern ?? undefined }),
-  });
+  const refetchInterval = useAutoRefresh({});
+
+  const { data, error, isLoading } = usePoolServiceGetPools(
+    {
+      limit: pagination.pageSize,
+      offset: pagination.pageIndex * pagination.pageSize,
+      orderBy,
+      ...(advancedSearch.enabled
+        ? { poolNamePattern: poolNamePattern ?? undefined }
+        : { poolNamePrefixPattern: poolNamePattern ?? undefined }),
+    },
+    undefined,
+    { refetchInterval: (query) => getPoolsRefetchInterval(query.state.data?.pools, refetchInterval) },
+  );
 
   const handleSearchChange = (value: string) => {
     if (value) {
